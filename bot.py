@@ -82,10 +82,12 @@ def is_banned(user_id):
     return str(user_id) in bans
 
 def get_main_keyboard():
-    keyboard = types.InlineKeyboardMarkup(row_width=1)
+    keyboard = types.InlineKeyboardMarkup(row_width=2) 
     keyboard.add(
         types.InlineKeyboardButton("🧩 Поддержка", url="https://t.me/AkiraSet"),
-        types.InlineKeyboardButton("👤 Профиль", callback_data="profile"),
+        types.InlineKeyboardButton("👤 Профиль", callback_data="profile")
+    )
+    keyboard.add(
         types.InlineKeyboardButton("💰 Купить подписку", callback_data="subscribe")
     )
     return keyboard
