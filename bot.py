@@ -11,8 +11,8 @@ from datetime import datetime, timedelta
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TOKEN = "7388296079:AAGkl4cdsnZ1QYe3xjjTNh2uGEghGLkA4tQ" 
-ADMIN_IDS = [7134890858] 
+TOKEN = "8174604970:AAGqLH0tM2ZwjicBpNz3EKCl3NCbt11trz4" 
+ADMIN_IDS = [7134890858, 1616527954] 
 WELCOME_PHOTO = "https://files.catbox.moe/1t54da.jpg"
 DEFAULT_AVATAR = "https://files.catbox.moe/dgi1qw.mp4"
 USD_RATE = 89.1362
