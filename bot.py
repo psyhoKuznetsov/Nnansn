@@ -452,4 +452,436 @@ def admin_reject_callback(call):
     if call.from_user.id not in ADMIN_IDS:
         return
     purchase_id = call.data.split("_")[2]
-    purchases = load_json('purchases.json'
+    purchases = load_json('purchases.json')
+    if purchase_id in purchases:
+        purchase = purchases[purchase_id]
+        bot.send_message(
+            purchase["user_id"],
+            f"<b>🚫 Покупка отклонена</b>\nКод оплаты: <code>{purchase['payment_code']}</code>\nВозможно, чек поддельный или вы не указали код оплаты. Для решения вопроса напишите @AkiraSet.",
+            parse_mode="HTML"
+        )
+        purchases[purchase_id]["processed"] = "rejected"
+        save_json('purchases.json', purchases)
+        bot.edit_message_caption(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            caption=f"{call.message.caption}\n\n<b>🚫 Отказано</b>",
+            parse_mode="HTML"
+        )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_approve_"))
+def admin_approve_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    purchase_id = call.data.split("_")[2]
+    purchases = load_json('purchases.json')
+    if purchase_id in purchases:
+        purchase = purchases[purchase_id]
+        purchase["admin_text"] = (
+            f"<b>‼️ Новая покупка</b>\n"
+            f"• <b>👤 Username:</b> @{purchase['username']}\n"
+            f"• <b>🆔 Telegram ID:</b> {purchase['user_id']}\n"
+            f"• <b>🛍 Товар:</b> Ключ на {purchase['product'].split('_')[0]} {'день' if purchase['product'].split('_')[0] == '1' else 'дней'}\n"
+            f"• <b>💰 Стоимость:</b> {purchase['price_rub']}₽ / {purchase['price_usd']}$\n"
+            f"• <b>📝 Код оплаты:</b> {purchase['payment_code']}\n"
+            f"• <b>💳 Способ оплаты:</b> {purchase['method']}\n"
+            f"• <b>🕐 Время (МСК):</b> {purchase['time']}"
+        )
+        save_json('purchases.json', purchases)
+        bot.send_message(
+            call.from_user.id,
+            f"<b>🔑 Отправьте ключ для {purchase['product']} (Код оплаты: {purchase['payment_code']}):</b>",
+            parse_mode="HTML"
+        )
+        bot.register_next_step_handler_by_chat_id(call.from_user.id, lambda msg: send_key(msg, purchase, purchase_id))
+
+def send_key(message, purchase, purchase_id):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    key = message.text.strip()
+    if not key:
+        bot.reply_to(message, "<b>❌ Ключ не может быть пустым!</b>", parse_mode="HTML")
+        return
+    bot.send_photo(
+        purchase["user_id"],
+        KEY_IMAGES[purchase["product"]],
+        caption=f"<b>✅ Спасибо за покупку!</b>\nКод оплаты: <code>{purchase['payment_code']}</code>\nВаш ключ:\n<code>{key}</code>",
+        parse_mode="HTML"
+    )
+    purchases = load_json('purchases.json')
+    purchases[purchase_id]["processed"] = "approved"
+    purchases[purchase_id]["key"] = key
+    save_json('purchases.json', purchases)
+    
+    users = load_json('users.json')
+    user_id_str = str(purchase["user_id"])
+    if user_id_str in users:
+        users[user_id_str]["purchased_keys"] += 1
+        users[user_id_str]["active_keys"] += 1
+        save_json('users.json', users)
+    
+    for admin_id in ADMIN_IDS:
+        try:
+            bot.edit_message_caption(
+                chat_id=admin_id,
+                message_id=int(purchase["message_id"]),
+                caption=f"{purchases[purchase_id]['admin_text']}\n\n<b>✅ Выдано</b>",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Error updating message for admin {admin_id}: {e}")
+    
+    bot.send_message(
+        message.chat.id,
+        f"<b>✅ Ключ выдан для {purchase['product']} (Код оплаты: {purchase['payment_code']})</b>",
+        parse_mode="HTML"
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_block_"))
+def admin_block_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    purchase_id = call.data.split("_")[2]
+    purchases = load_json('purchases.json')
+    if purchase_id in purchases:
+        purchase = purchases[purchase_id]
+        user_id = str(purchase["user_id"])
+        bans = load_json('ban.json')
+        bans[user_id] = {
+            "username": purchase["username"],
+            "banned_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "reason": "Нарушение правил (через покупку)"
+        }
+        save_json('ban.json', bans)
+        
+        bot.send_message(
+            purchase["user_id"],
+            f"<b>🚫 Ваш аккаунт заблокирован за нарушение правил!</b>\nКод оплаты: <code>{purchase['payment_code']}</code>",
+            parse_mode="HTML"
+        )
+        purchases[purchase_id]["processed"] = "blocked"
+        save_json('purchases.json', purchases)
+        bot.edit_message_caption(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            caption=f"{call.message.caption}\n\n<b>🚫 Забанен</b>",
+            parse_mode="HTML"
+        )
+
+@bot.callback_query_handler(func=lambda call: call.data == "back_to_main")
+def back_to_main_callback(call):
+    if is_banned(call.from_user.id):
+        return
+    bot.edit_message_caption(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        caption="<b>✨ Выберите категорию:</b>",
+        reply_markup=get_main_keyboard(),
+        parse_mode="HTML"
+    )
+
+@bot.message_handler(commands=['admin'])
+def admin_command(message):
+    if message.from_user.id not in ADMIN_IDS:
+        bot.reply_to(message, "<b>⛔ У вас нет доступа!</b>", parse_mode="HTML")
+        return
+    bot.send_message(
+        message.chat.id,
+        "<b>👑 Администрирование</b>\n\nВыберите действие:",
+        reply_markup=get_admin_keyboard(),
+        parse_mode="HTML"
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_add_channel")
+def admin_add_channel_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    msg = bot.send_message(call.message.chat.id, "<b>📝 Отправьте ID канала, ссылку и название через пробел</b>\nПример: <code>-100123456789 https://t.me/channel Канал</code>", parse_mode="HTML")
+    bot.register_next_step_handler(msg, process_add_channel)
+
+def process_add_channel(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        parts = message.text.split(" ", 2)
+        if len(parts) != 3:
+            bot.reply_to(message, "<b>❌ Неверный формат!</b>\nПример: <code>-100123456789 https://t.me/channel Канал</code>", parse_mode="HTML")
+            return
+        channel_id, channel_url, channel_title = parts
+        bot.get_chat(channel_id) 
+        channels = load_json('kanal.json')
+        if any(ch.get('channel_id') == channel_id for ch in channels):
+            bot.reply_to(message, f"<b>⚠️ Канал {channel_title} уже добавлен!</b>", parse_mode="HTML")
+            return
+        channels.append({
+            "channel_id": channel_id,
+            "channel_url": channel_url,
+            "title": channel_title,
+            "added_at": time.strftime("%Y-%m-%d %H:%M:%S")
+        })
+        save_json('kanal.json', channels)
+        bot.reply_to(message, f"<b>✅ Канал {channel_title} добавлен!</b>", parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error adding channel: {e}")
+        bot.reply_to(message, f"<b>❌ Ошибка:</b> {str(e)}", parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_remove_channel")
+def admin_remove_channel_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    channels = load_json('kanal.json')
+    if not channels:
+        bot.edit_message_text("<b>⚠️ Список каналов пуст!</b>", call.message.chat.id, call.message.message_id, parse_mode="HTML")
+        return
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
+    for i, channel in enumerate(channels):
+        keyboard.add(types.InlineKeyboardButton(f"{i+1}. {channel['title']}", callback_data=f"remove_channel_{i}"))
+    keyboard.add(types.InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
+    bot.edit_message_text("<b>🗑️ Выберите канал для удаления:</b>", call.message.chat.id, call.message.message_id, reply_markup=keyboard, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("remove_channel_"))
+def remove_specific_channel_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        idx = int(call.data.split("_")[2])
+        channels = load_json('kanal.json')
+        if idx < len(channels):
+            removed = channels.pop(idx)
+            save_json('kanal.json', channels)
+            bot.edit_message_text(
+                f"<b>✅ Канал {removed['title']} удален!</b>\n\nВыберите действие:",
+                call.message.chat.id, call.message.message_id,
+                reply_markup=get_admin_keyboard(),
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.error(f"Error removing channel: {e}")
+        bot.answer_callback_query(call.id, "❌ Ошибка!")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_list_channels")
+def admin_list_channels_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    channels = load_json('kanal.json')
+    text = "<b>📋 Список каналов:</b>\n\n" + (
+        "\n".join(f"{i+1}. <b>{ch['title']}</b> ({ch['channel_id']})" for i, ch in enumerate(channels)) or "❌ Пусто"
+    )
+    keyboard = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=keyboard, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_ban_user")
+def admin_ban_user_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    msg = bot.send_message(call.message.chat.id, "<b>🚫 Введите Telegram ID пользователя для бана:</b>", parse_mode="HTML")
+    bot.register_next_step_handler(msg, process_ban_user)
+
+def process_ban_user(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        user_id = message.text.strip()
+        if not user_id.isdigit():
+            bot.reply_to(message, "<b>❌ ID должен быть числом!</b>", parse_mode="HTML")
+            return
+        user_id = str(user_id)
+        if int(user_id) in ADMIN_IDS:
+            bot.reply_to(message, "<b>❌ Нельзя забанить админа!</b>", parse_mode="HTML")
+            return
+        bans = load_json('ban.json')
+        if user_id in bans:
+            bot.reply_to(message, "<b>⚠️ Пользователь уже забанен!</b>", parse_mode="HTML")
+            return
+        users = load_json('users.json')
+        username = users.get(user_id, {}).get("username", "Неизвестно")
+        bans[user_id] = {
+            "username": username,
+            "banned_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "reason": "Ручной бан админом"
+        }
+        save_json('ban.json', bans)
+        bot.reply_to(message, f"<b>✅ Пользователь {username} (ID: {user_id}) забанен!</b>", parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error banning user: {e}")
+        bot.reply_to(message, f"<b>❌ Ошибка:</b> {str(e)}", parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_unban_user")
+def admin_unban_user_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    msg = bot.send_message(call.message.chat.id, "<b>✅ Введите Telegram ID пользователя для разбана:</b>", parse_mode="HTML")
+    bot.register_next_step_handler(msg, process_unban_user)
+
+def process_unban_user(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        user_id = message.text.strip()
+        if not user_id.isdigit():
+            bot.reply_to(message, "<b>❌ ID должен быть числом!</b>", parse_mode="HTML")
+            return
+        user_id = str(user_id)
+        bans = load_json('ban.json')
+        if user_id not in bans:
+            bot.reply_to(message, "<b>⚠️ Пользователь не забанен!</b>", parse_mode="HTML")
+            return
+        username = bans[user_id]["username"]
+        del bans[user_id]
+        save_json('ban.json', bans)
+        bot.reply_to(message, f"<b>✅ Пользователь {username} (ID: {user_id}) разбанен!</b>", parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error unbanning user: {e}")
+        bot.reply_to(message, f"<b>❌ Ошибка:</b> {str(e)}", parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_stats")
+def admin_stats_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    purchases = load_json('purchases.json')
+    users = load_json('users.json')
+    bans = load_json('ban.json')
+    
+    total_keys = sum(1 for p in purchases.values() if p.get("processed") == "approved")
+    month_start = datetime.now() - timedelta(days=30)
+    tbank_month = sum(p["price_rub"] for p in purchases.values() if p.get("processed") == "approved" and p["method"] == "Т-БАНК" and datetime.strptime(p["time"], "%Y-%m-%d %H:%M:%S") >= month_start)
+    crypto_month = sum(p["price_rub"] for p in purchases.values() if p.get("processed") == "approved" and p["method"] == "CryptoBot" and datetime.strptime(p["time"], "%Y-%m-%d %H:%M:%S") >= month_start)
+    total_users = len(users)
+    banned_users = len(bans)
+    
+    stats_text = (
+        f"<b>📊 Статистика бота</b>\n\n"
+        f"• <b>Всего ключей куплено:</b> {total_keys}\n"
+        f"• <b>Заработано за месяц (Т-БАНК):</b> {tbank_month}₽\n"
+        f"• <b>Заработано за месяц (CryptoBot):</b> {crypto_month}₽\n"
+        f"• <b>Всего пользователей:</b> {total_users}\n"
+        f"• <b>Забаненных пользователей:</b> {banned_users}"
+    )
+    keyboard = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
+    bot.edit_message_text(stats_text, call.message.chat.id, call.message.message_id, reply_markup=keyboard, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_dump_db")
+def admin_dump_db_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    files = ['users.json', 'kanal.json', 'purchases.json', 'ban.json']
+    for file in files:
+        try:
+            with open(file, 'rb') as f:
+                bot.send_document(call.message.chat.id, f, caption=f"Выгрузка {file}")
+        except Exception as e:
+            logger.error(f"Error dumping {file}: {e}")
+            bot.send_message(call.message.chat.id, f"<b>❌ Ошибка при выгрузке {file}:</b> {str(e)}", parse_mode="HTML")
+    bot.send_message(call.message.chat.id, "<b>✅ Выгрузка завершена</b>", parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_list_users")
+def admin_list_users_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    users = load_json('users.json')
+    text = "<b>👥 Список пользователей:</b>\n\n"
+    for i, (user_id, data) in enumerate(users.items(), 1):
+        text += f"{i}. @{data['username']} (ID: {user_id}) - {data['status']}\n"
+    if not users:
+        text += "❌ Пусто"
+    keyboard = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=keyboard, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_list_purchases")
+def admin_list_purchases_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    purchases = load_json('purchases.json')
+    text = "<b>🛒 Список покупок:</b>\n\n"
+    for i, (purchase_id, data) in enumerate(purchases.items(), 1):
+        status = data.get('processed', 'В ожидании')
+        text += f"{i}. @{data['username']} - {data['product']} ({data['payment_code']}) - {status}\n"
+    if not purchases:
+        text += "❌ Пусто"
+    keyboard = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=keyboard, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_find_user")
+def admin_find_user_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    msg = bot.send_message(call.message.chat.id, "<b>🔍 Введите Telegram ID пользователя:</b>", parse_mode="HTML")
+    bot.register_next_step_handler(msg, process_find_user)
+
+def process_find_user(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        user_id = message.text.strip()
+        if not user_id.isdigit():
+            bot.reply_to(message, "<b>❌ ID должен быть числом!</b>", parse_mode="HTML")
+            return
+        users = load_json('users.json')
+        user_id = str(user_id)
+        if user_id not in users:
+            bot.reply_to(message, "<b>❌ Пользователь не найден!</b>", parse_mode="HTML")
+            return
+        data = users[user_id]
+        text = (
+            f"<b>👤 Информация о пользователе</b>\n\n"
+            f"• <b>Username:</b> @{data['username']}\n"
+            f"• <b>ID:</b> {user_id}\n"
+            f"• <b>Имя:</b> {data['name']}\n"
+            f"• <b>Статус:</b> {data['status']}\n"
+            f"• <b>Активные ключи:</b> {data['active_keys']}\n"
+            f"• <b>Куплено ключей:</b> {data['purchased_keys']}\n"
+            f"• <b>Дата регистрации:</b> {data['date_joined']}\n"
+            f"• <b>Последняя активность:</b> {data['last_active']}"
+        )
+        bot.reply_to(message, text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error finding user: {e}")
+        bot.reply_to(message, f"<b>❌ Ошибка:</b> {str(e)}", parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_change_status")
+def admin_change_status_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    msg = bot.send_message(call.message.chat.id, "<b>✨ Введите Telegram ID и новый статус через пробел</b>\nПример: <code>123456789 Админ</code>", parse_mode="HTML")
+    bot.register_next_step_handler(msg, process_change_status)
+
+def process_change_status(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        parts = message.text.split(" ", 1)
+        if len(parts) != 2:
+            bot.reply_to(message, "<b>❌ Неверный формат! Пример:</b> <code>123456789 Админ</code>", parse_mode="HTML")
+            return
+        user_id, new_status = parts
+        if not user_id.isdigit():
+            bot.reply_to(message, "<b>❌ ID должен быть числом!</b>", parse_mode="HTML")
+            return
+        user_id = str(user_id)
+        users = load_json('users.json')
+        if user_id not in users:
+            bot.reply_to(message, "<b>❌ Пользователь не найден!</b>", parse_mode="HTML")
+            return
+        users[user_id]["status"] = new_status
+        save_json('users.json', users)
+        bot.reply_to(message, f"<b>✅ Статус пользователя @{users[user_id]['username']} изменен на {new_status}</b>", parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error changing status: {e}")
+        bot.reply_to(message, f"<b>❌ Ошибка:</b> {str(e)}", parse_mode="HTML")
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_payment_info")
+def admin_payment_info_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    msg = bot.send_message(call.message.chat.id, "<b>💳 Введите код оплаты для получения информации:</b>", parse_mode="HTML")
+    bot.register_next_step_handler(msg, process_payment_info)
+
+def process_payment_info(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        payment_code = message.text.strip()
+        purchases = load_json('purchases.json')
+        if payment_code not in purchases:
+            bot.reply_to(mess
