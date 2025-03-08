@@ -329,7 +329,7 @@ def pay_cryptobot_callback(call):
             parse_mode="HTML"
         )
         purchases = load_json('purchases.json')
-        purchase_id = payment_code  # Используем код оплаты как идентификатор покупки
+        purchase_id = payment_code 
         purchases[purchase_id] = {
             "user_id": call.from_user.id,
             "username": call.from_user.username or "Нет юзернейма",
@@ -507,7 +507,7 @@ def send_key(message, purchase, purchase_id):
     bot.send_photo(
         purchase["user_id"],
         KEY_IMAGES[purchase["product"]],
-        caption=f"<b>✅ Спасибо за покупку!</b>\nКод оплаты: <code>{purchase['payment_code']}</code>\nВаш ключ:\n<code>{key}</code>",
+        caption=f"<b>✅ Спасибо за покупку!</b>\nВаш ключ:\n<code>{key}</code>",
         parse_mode="HTML"
     )
     purchases = load_json('purchases.json')
