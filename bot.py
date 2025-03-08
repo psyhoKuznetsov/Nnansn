@@ -884,4 +884,45 @@ def process_payment_info(message):
         payment_code = message.text.strip()
         purchases = load_json('purchases.json')
         if payment_code not in purchases:
-            bot.reply_to(mess
+            bot.reply_to(message, f"<b>❌ Покупка с кодом {payment_code} не найдена!</b>", parse_mode="HTML")
+            return
+        purchase = purchases[payment_code]
+        status = purchase.get('processed', 'В ожидании')
+        text = (
+            f"<b>💳 Информация об оплате</b>\n\n"
+            f"• <b>Код оплаты:</b> {purchase['payment_code']}\n"
+            f"• <b>Username:</b> @{purchase['username']}\n"
+            f"• <b>ID:</b> {purchase['user_id']}\n"
+            f"• <b>Товар:</b> Ключ на {purchase['product'].split('_')[0]} {'день' if purchase['product'].split('_')[0] == '1' else 'дней'}\n"
+            f"• <b>Стоимость:</b> {purchase['price_rub']}₽ / {purchase['price_usd']}$\n"
+            f"• <b>Способ оплаты:</b> {purchase['method']}\n"
+            f"• <b>Время:</b> {purchase['time']}\n"
+            f"• <b>Статус:</b> {status}"
+        )
+        if "key" in purchase:
+            text += f"\n• <b>Выданный ключ:</b> {purchase['key']}"
+        bot.reply_to(message, text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error getting payment info: {e}")
+        bot.reply_to(message, f"<b>❌ Ошибка:</b> {str(e)}", parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_back")
+def admin_back_callback(call):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+    bot.edit_message_text(
+        "<b>👑 Администрирование</b>\n\nВыберите действие:",
+        call.message.chat.id, call.message.message_id,
+        reply_markup=get_admin_keyboard(),
+        parse_mode="HTML"
+    )
+
+if __name__ == "__main__":
+    logger.info("🚀 Бот запущен")
+    ensure_files_exist()
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=0, timeout=60)
+        except Exception as e:
+            logger.error(f"🔥 Бот упал: {e}")
+            time.sleep(10)
